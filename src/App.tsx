@@ -13,6 +13,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { 
+  signInAnonymously,
   onAuthStateChanged, 
   GoogleAuthProvider, 
   signInWithPopup 
@@ -29,7 +30,10 @@ import {
   ChevronRight, 
   Activity,
   LogIn,
-  AlertTriangle
+  AlertTriangle,
+  Share2,
+  ExternalLink,
+  Eye
 } from 'lucide-react';
 import React from 'react';
 import { cn } from './lib/utils';
@@ -52,17 +56,38 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  // Check if we are in view-only mode from URL
+  const [isViewOnly, setIsViewOnly] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('view') === 'true') {
+      setIsViewOnly(true);
+    }
+  }, []);
+
   // 1. Auth Setup 
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        setUser(user);
         setAuthError(null);
+        setIsLoading(false);
+      } else if (isViewOnly) {
+        // Guests in view-only mode try anonymous sign-in
+        try {
+          await signInAnonymously(auth);
+        } catch (err) {
+          console.error("Anon auth failed:", err);
+          setIsLoading(false);
+        }
+      } else {
+        setUser(null);
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
     return () => unsubAuth();
-  }, []);
+  }, [isViewOnly]);
 
   const login = async () => {
     try {
@@ -76,7 +101,7 @@ export default function App() {
 
   // 2. Load or Create Live Session (Preserved logic)
   useEffect(() => {
-    if (!user) return;
+    if (!user && !isViewOnly) return;
 
     async function initSession() {
       try {
@@ -86,6 +111,8 @@ export default function App() {
 
         let sessionId = '';
         if (querySnapshot.empty) {
+          if (isViewOnly) return;
+
           const newSession = {
             name: 'Main Tournament',
             status: 'active',
@@ -102,7 +129,7 @@ export default function App() {
 
         // Sync players
         const playersRef = collection(db, 'sessions', sessionId, 'players');
-        const pq = query(playersRef, orderBy('score', 'asc'));
+        const pq = query(playersRef, orderBy('score', 'desc'));
         const unsubPlayers = onSnapshot(pq, (snapshot) => {
           const playersData = snapshot.docs.map(doc => ({
             id: doc.id,
@@ -112,7 +139,7 @@ export default function App() {
         }, (err) => {
           console.error("Snapshot error:", err);
           if (err.message.includes('permission')) {
-            setAuthError("Sync blocked by security rules.");
+            setAuthError("Sync blocked by security rules. Please sign in.");
           }
         });
 
@@ -124,11 +151,11 @@ export default function App() {
     }
 
     initSession();
-  }, [user]);
+  }, [user, isViewOnly]);
 
   const addPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPlayerName.trim() || !currentSession) return;
+    if (!newPlayerName.trim() || !currentSession || isViewOnly) return;
 
     const playersRef = collection(db, 'sessions', currentSession.id, 'players');
     
@@ -142,27 +169,33 @@ export default function App() {
     setNewPlayerName('');
   };
 
-  const updateScore = async (playerId: string, delta: number) => {
-    if (!currentSession) return;
+  const setScore = async (playerId: string, newValue: number) => {
+    if (!currentSession || isViewOnly) return;
     const playerRef = doc(db, 'sessions', currentSession.id, 'players', playerId);
     await updateDoc(playerRef, {
-      score: increment(delta)
+      score: newValue
     });
   };
 
-  if (!user) {
+  const openViewOnly = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', 'true');
+    window.open(url.toString(), '_blank');
+  };
+
+  if (!user && !isViewOnly) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0B0D0F] text-white p-6 gap-8">
         <div className="text-center">
-          <h1 className="text-6xl md:text-8xl font-black uppercase tracking-tighter mb-4">Putt<span className="text-[#00FF41]">Shack</span></h1>
-          <p className="opacity-50 font-mono text-sm tracking-widest uppercase">Live Tournament Grid</p>
+          <h1 className="text-6xl md:text-8xl font-black uppercase tracking-tighter mb-4">the Putt<span className="text-[#00FF41]">Shack</span></h1>
+          <p className="opacity-50 font-mono text-sm tracking-widest uppercase">Live Tournament Grid • MADE BY ASJT</p>
         </div>
 
         <div className="bg-white text-black p-8 md:p-12 shadow-[20px_20px_0_rgba(255,255,255,0.1)] flex flex-col items-center gap-8 max-w-md w-full">
           <Users className="w-16 h-16 opacity-20" />
           <div className="text-center flex flex-col gap-2">
             <h2 className="text-2xl font-black uppercase italic tracking-tight">Identity Required</h2>
-            <p className="text-sm opacity-60">Authorize your device to start tracking scores on the live grid.</p>
+            <p className="text-sm opacity-60">Authorize your device to start tracking scores or view the live grid.</p>
           </div>
           
           <button 
@@ -173,8 +206,18 @@ export default function App() {
             Connect via Google
           </button>
 
+          <div className="w-full h-px bg-black text-black/10 my-2" />
+
+          <button 
+            onClick={() => setIsViewOnly(true)}
+            className="text-xs font-black uppercase tracking-widest opacity-40 hover:opacity-100 transition-opacity flex items-center gap-2"
+          >
+            <Eye className="w-3 h-3" />
+            Continue as Guest (View Only)
+          </button>
+
           {authError && (
-            <div className="mt-4 p-4 bg-red-50 border border-red-200 text-red-600 text-xs flex gap-3 items-start">
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 text-red-600 text-xs flex gap-3 items-start w-full">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <span>{authError}</span>
             </div>
@@ -201,18 +244,34 @@ export default function App() {
     <div className="min-h-screen bg-[#0B0D0F] text-white font-sans selection:bg-[#00FF41] selection:text-black p-6 md:p-10 flex flex-col">
       {/* Header Section */}
       <header className="flex flex-col md:flex-row justify-between items-baseline mb-12 border-b-4 border-[#00FF41] pb-6 gap-6">
-        <div>
+        <div className="relative group">
           <h1 className="text-[80px] md:text-[120px] font-black leading-[0.85] tracking-tighter uppercase whitespace-pre">
             Leader<br/>Board
           </h1>
+          {isViewOnly && (
+            <span className="absolute -top-4 -left-4 bg-[#00FF41] text-black px-3 py-1 font-black text-[10px] uppercase tracking-widest skew-x-[-12deg]">
+              View Only Mode
+            </span>
+          )}
         </div>
-        <div className="text-left md:text-right flex flex-col gap-1">
+        <div className="text-left md:text-right flex flex-col gap-1 items-start md:items-end w-full md:w-auto">
           <div className="flex items-center md:justify-end gap-2 text-[#00FF41] font-mono text-sm uppercase tracking-widest">
             <Activity className="w-4 h-4 animate-pulse" />
             <span>Session Live</span>
           </div>
           <p className="text-5xl md:text-7xl font-black tracking-tight">{currentSession?.id.slice(0, 6).toUpperCase()}</p>
-          <p className="text-[10px] opacity-50 uppercase font-bold tracking-widest">Live Sync v24.1.0</p>
+          <div className="flex flex-wrap gap-2 md:justify-end items-center mt-2 w-full md:w-auto">
+            {!isViewOnly && (
+              <button 
+                onClick={openViewOnly}
+                className="bg-white/10 hover:bg-white text-white hover:text-black px-4 py-2 rounded font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Launch View Mode
+              </button>
+            )}
+            <p className="text-[10px] opacity-50 uppercase font-black tracking-widest">Live Sync v24.1.0</p>
+          </div>
         </div>
       </header>
 
@@ -220,7 +279,7 @@ export default function App() {
       <main className="grid grid-cols-1 md:grid-cols-12 gap-10 lg:gap-16 flex-grow">
         
         {/* Leaderboard Column */}
-        <section className="md:col-span-12 lg:col-span-8 flex flex-col gap-3">
+        <section className={cn("md:col-span-12 lg:col-span-8 flex flex-col gap-3", isViewOnly && "lg:col-span-12")}>
           <div className="grid grid-cols-12 px-4 py-2 opacity-50 uppercase text-[10px] font-black tracking-[0.2em] border-b border-white/10">
             <div className="col-span-2">Rank</div>
             <div className="col-span-6">Player</div>
@@ -251,14 +310,21 @@ export default function App() {
                     </span>
                     {index === 0 && <span className="text-[8px] font-black tracking-widest uppercase">Current Champion</span>}
                   </div>
-                  <div className="col-span-4 flex items-center justify-end gap-4">
-                    <div className="flex items-center gap-1 opacity-0 hover:opacity-100 transition-opacity">
-                       <button onClick={() => updateScore(player.id, -1)} className="p-1 hover:bg-black/10 rounded transition-colors"><Minus className="w-4 h-4"/></button>
-                       <button onClick={() => updateScore(player.id, 1)} className="p-1 hover:bg-black/10 rounded transition-colors"><Plus className="w-4 h-4"/></button>
-                    </div>
-                    <span className="text-3xl md:text-5xl font-black tracking-tighter">
-                      {player.score > 0 ? `+${player.score}` : player.score}
-                    </span>
+                  <div className="col-span-4 flex items-center justify-end gap-6">
+                    {!isViewOnly ? (
+                      <div className="flex items-center bg-black/20 rounded-lg p-1 border border-white/10 group-hover:border-white/30 transition-colors">
+                        <input
+                          type="number"
+                          value={player.score}
+                          onChange={(e) => setScore(player.id, parseInt(e.target.value) || 0)}
+                          className="w-16 md:w-24 bg-transparent text-center text-2xl md:text-4xl font-black outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-3xl md:text-5xl font-black tracking-tighter">
+                        {player.score > 0 ? `+${player.score}` : player.score}
+                      </span>
+                    )}
                   </div>
                 </motion.div>
               ))}
@@ -273,9 +339,10 @@ export default function App() {
           </div>
         </section>
 
-        {/* Controls Sidebar */}
-        <section className="md:col-span-12 lg:col-span-4 flex flex-col gap-8">
-          <div className="bg-white text-black p-8 flex flex-col gap-6 shadow-[12px_12px_0_rgba(255,255,255,0.1)]">
+        {/* Controls Sidebar - Hidden in View Only */}
+        {!isViewOnly && (
+          <section className="md:col-span-12 lg:col-span-4 flex flex-col gap-8">
+            <div className="bg-white text-black p-8 flex flex-col gap-6 shadow-[12px_12px_0_rgba(255,255,255,0.1)]">
             <h2 className="text-xs font-black uppercase tracking-[0.3em] flex items-center gap-2">
               <Users className="w-4 h-4" />
               Add Contender
@@ -318,12 +385,14 @@ export default function App() {
             </div>
           </div>
         </section>
-      </main>
+      )}
+    </main>
 
       {/* Footer Ticker */}
       <footer className="mt-16 pt-8 overflow-hidden border-t border-white/10">
         <div className="whitespace-nowrap animate-marquee flex">
           <div className="uppercase font-black text-xs tracking-[0.5em] opacity-20 flex gap-20 items-center pr-20">
+            <span>the PuttShack (made by ASJT)</span>
             <span>NEXT HOLE: THE WINDMILL</span>
             <span>DRINKS SPECIAL: LIME MARGARITA</span>
             <span>PAR FOR THIS COURSE IS 42</span>
