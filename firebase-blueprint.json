@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "Session": {
+      "title": "Game Session",
+      "description": "A mini-golf game session",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "finished"] }
+      },
+      "required": ["name", "createdAt", "status"]
+    },
+    "Player": {
+      "title": "Player",
+      "description": "A player in the leaderboard",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "score": { "type": "integer" },
+        "color": { "type": "string" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "score", "joinedAt"]
+    }
+  },
+  "firestore": {
+    "/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Game sessions"
+    },
+    "/sessions/{sessionId}/players/{playerId}": {
+      "schema": "Player",
+      "description": "Players contributing to a specific session"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Puttshack Leaderboard",
+  "description": "A real-time, multi-device mini-golf leaderboard influenced by Puttshack's neon aesthetic.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
